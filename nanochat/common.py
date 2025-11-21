@@ -56,7 +56,7 @@ def get_base_dir():
     os.makedirs(nanochat_dir, exist_ok=True)
     return nanochat_dir
 
-def download_file_with_lock(url, filename):
+def download_file_with_lock(url, filename, postprocess_fn=None):
     """
     Downloads a file from a URL to a local path in the base directory.
     Uses a lock file to prevent concurrent downloads among multiple ranks.
@@ -76,13 +76,14 @@ def download_file_with_lock(url, filename):
         if os.path.exists(file_path):
             return file_path
 
+        # Download the content as bytes
         print(f"Downloading {url}...")
         with urllib.request.urlopen(url) as response:
-            content = response.read().decode('utf-8')
+            content = response.read() # bytes
 
-        with open(file_path, 'w') as f:
+        # Write to local file
+        with open(file_path, 'wb') as f:
             f.write(content)
-
         print(f"Downloaded to {file_path}")
 
         # Run the postprocess function if provided
