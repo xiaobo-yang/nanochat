@@ -52,12 +52,12 @@ torch = [
 
 [[tool.uv.index]]  
 name = "pytorch-cpu"  
-url = "https://download.pytorch.org/whl/cpu"  
+url = "https://artifactory.stepfun-inc.com/artifactory/api/pypi/pypi-public/simple"
 explicit = true  
   
 [[tool.uv.index]]  
 name = "pytorch-cu128"  
-url = "https://download.pytorch.org/whl/cu128"  
+url = "https://artifactory.stepfun-inc.com/artifactory/api/pypi/pypi-public/simple"
 explicit = true
 
 [project.optional-dependencies]  
