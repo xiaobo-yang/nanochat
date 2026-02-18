@@ -18,14 +18,14 @@ mkdir -p $NANOCHAT_BASE_DIR
 # -----------------------------------------------------------------------------
 # Python venv setup with uv
 
-# install uv (if not already installed)
-command -v uv &> /dev/null || curl -LsSf https://astral.sh/uv/install.sh | sh
-# create a .venv local virtual environment (if it doesn't exist)
-[ -d ".venv" ] || uv venv
-# install the repo dependencies
-uv sync --extra gpu
-# activate venv so that `python` uses the project's venv instead of system python
-source .venv/bin/activate
+# # install uv (if not already installed)
+# command -v uv &> /dev/null || curl -LsSf https://astral.sh/uv/install.sh | sh
+# # create a .venv local virtual environment (if it doesn't exist)
+# [ -d ".venv" ] || uv venv
+# # install the repo dependencies
+# uv sync --extra gpu
+# # activate venv so that `python` uses the project's venv instead of system python
+# source .venv/bin/activate
 
 # -----------------------------------------------------------------------------
 # wandb setup
@@ -34,10 +34,12 @@ source .venv/bin/activate
 #    `wandb login`
 # 2) Set the WANDB_RUN environment variable when running this script, e.g.:
 #    `WANDB_RUN=d26 bash speedrun.sh`
-if [ -z "$WANDB_RUN" ]; then
-    # by default use "dummy" : it's handled as a special case, skips logging to wandb
-    WANDB_RUN=dummy
-fi
+# if [ -z "$WANDB_RUN" ]; then
+#     # by default use "dummy" : it's handled as a special case, skips logging to wandb
+#     WANDB_RUN=dummy
+# fi
+
+WANDB_RUN=speedrun
 
 # -----------------------------------------------------------------------------
 # During the course of the run, we will be writing markdown reports to the report/
