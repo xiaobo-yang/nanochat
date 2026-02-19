@@ -33,7 +33,7 @@ def _load_flash_attention_3():
         import os
         os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
         from kernels import get_kernel
-        return get_kernel('varunneal/flash-attention-3').flash_attn_interface
+        return get_kernel('varunneal/flash-attention-3')
     except Exception:
         return None
 
