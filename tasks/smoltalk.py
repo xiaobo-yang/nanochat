@@ -4,8 +4,11 @@ https://huggingface.co/datasets/HuggingFaceTB/smol-smoltalk
 We use the "smol" version, which is more appropriate for smaller models.
 """
 
+import os
+import glob
 from datasets import load_dataset
 from tasks.common import Task
+from nanochat.common import get_base_dir
 
 class SmolTalk(Task):
     """ smol-smoltalk dataset. train is 460K rows, test is 24K rows. """
@@ -13,7 +16,12 @@ class SmolTalk(Task):
     def __init__(self, split, **kwargs):
         super().__init__(**kwargs)
         assert split in ["train", "test"], "SmolTalk split must be train|test"
-        self.ds = load_dataset("HuggingFaceTB/smol-smoltalk", split=split).shuffle(seed=42)
+        local_dir = os.path.join(get_base_dir(), "datasets", "smol-smoltalk", "data")
+        local_files = sorted(glob.glob(os.path.join(local_dir, f"{split}-*.parquet")))
+        if local_files:
+            self.ds = load_dataset("parquet", data_files=local_files, split="train").shuffle(seed=42)
+        else:
+            self.ds = load_dataset("HuggingFaceTB/smol-smoltalk", split=split).shuffle(seed=42)
         self.length = len(self.ds)
 
     def num_examples(self):
