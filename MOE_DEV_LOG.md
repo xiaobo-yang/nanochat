@@ -94,6 +94,46 @@ Selected benchmark scores:
 
 ---
 
+## Dense vs MoE Iso-FLOPs Comparison
+
+### Training Configuration (identical except MoE flags)
+Both models: 12 layers, aspect_ratio=64, head_dim=64, seq_len=1024, 8x H800, FP8, target_param_data_ratio=8.25
+
+| | Dense (gpt2_small) | MoE (moe_small) |
+|---|---|---|
+| Total params | 286M | 456M |
+| Active params/token | 286M | 286M |
+| Training tokens | 908M | 908M |
+| Training time | **5.34 min** | 25.25 min |
+| MFU | **~36%** | ~8% |
+
+### Quality Comparison
+| Metric | Dense | MoE | Delta |
+|--------|-------|-----|-------|
+| **Val BPB** | 0.9161 | **0.9015** | **-1.6%** |
+| **Train BPB** | 0.9160 | **0.9012** | -1.6% |
+| **CORE metric** | 0.1113 | **0.1116** | +0.03% |
+| **Final loss** | 3.06 | **2.99** | -2.3% |
+
+### Benchmark Details (final eval)
+| Benchmark | Dense | MoE | Delta |
+|-----------|-------|-----|-------|
+| HellaSwag (0-shot) | 0.315 | **0.327** | +0.012 |
+| ARC-Easy (10-shot) | 0.493 | **0.514** | +0.021 |
+| ARC-Challenge (10-shot) | 0.247 | **0.257** | +0.010 |
+| PIQA (10-shot) | 0.612 | **0.645** | +0.033 |
+| COPA (0-shot) | **0.580** | 0.570 | -0.010 |
+| Winograd (0-shot) | 0.586 | 0.586 | 0.000 |
+| Winogrande (0-shot) | **0.509** | 0.503 | -0.006 |
+| BoolQ (10-shot) | **0.502** | 0.470 | -0.032 |
+| LAMBADA (0-shot) | 0.247 | **0.273** | +0.026 |
+| CommonsenseQA (10-shot) | 0.238 | **0.270** | +0.032 |
+
+### Conclusion
+MoE wins on perplexity (BPB -1.6%) and most benchmarks (PIQA +3.3%, LAMBADA +2.6%, ARC-Easy +2.1%). CORE composite is essentially tied. The cost is ~5x slower wall-clock training due to unoptimized MoE kernel (sequential expert loop, no FP8 on experts, torch.compile recompilation).
+
+---
+
 ## Experimental Observations
 
 ### Balance Loss
