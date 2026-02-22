@@ -24,6 +24,7 @@ from nanochat.optim import MuonAdamW, DistMuonAdamW
 
 # Our custom Flash Attention module that automatically uses FA3 on Hopper+ and SDPA fallback elsewhere
 from nanochat.flash_attention import flash_attn
+from nanochat.moe import MoE
 
 @dataclass
 class GPTConfig:
@@ -37,6 +38,12 @@ class GPTConfig:
     # Characters: L=long (full context), S=short (half context)
     # Examples: "L"=all full context, "SL"=alternating, "SSL"=two short then one long
     window_pattern: str = "SSSL"
+    # MoE (Mixture-of-Experts)
+    use_moe: bool = False
+    n_experts: int = 8
+    expert_topk: int = 2
+    moe_freq: int = 1  # every N-th layer uses MoE (1=all layers)
+    expert_hidden_mult: int = 4  # expert hidden dim = expert_hidden_mult * n_embd
 
 
 def norm(x):
@@ -135,12 +142,21 @@ class Block(nn.Module):
     def __init__(self, config, layer_idx):
         super().__init__()
         self.attn = CausalSelfAttention(config, layer_idx)
-        self.mlp = MLP(config)
+        self.use_moe = config.use_moe and (layer_idx % config.moe_freq == 0)
+        if self.use_moe:
+            self.mlp = MoE(config)
+        else:
+            self.mlp = MLP(config)
 
     def forward(self, x, ve, cos_sin, window_size, kv_cache):
         x = x + self.attn(norm(x), ve, cos_sin, window_size, kv_cache)
-        x = x + self.mlp(norm(x))
-        return x
+        if self.use_moe:
+            mlp_out, balance_loss = self.mlp(norm(x))
+            x = x + mlp_out
+            return x, balance_loss
+        else:
+            x = x + self.mlp(norm(x))
+            return x, 0.0
 
 
 class GPT(nn.Module):
@@ -213,8 +229,14 @@ class GPT(nn.Module):
             torch.nn.init.uniform_(block.attn.c_k.weight, -s, s)
             torch.nn.init.uniform_(block.attn.c_v.weight, -s, s)
             torch.nn.init.zeros_(block.attn.c_proj.weight) # projections are zero
-            torch.nn.init.uniform_(block.mlp.c_fc.weight, -s, s)
-            torch.nn.init.zeros_(block.mlp.c_proj.weight)
+            if block.use_moe:
+                torch.nn.init.zeros_(block.mlp.gate.weight)
+                for expert in block.mlp.experts:
+                    torch.nn.init.uniform_(expert.c_fc.weight, -s, s)
+                    torch.nn.init.zeros_(expert.c_proj.weight)
+            else:
+                torch.nn.init.uniform_(block.mlp.c_fc.weight, -s, s)
+                torch.nn.init.zeros_(block.mlp.c_proj.weight)
 
         # Per-layer scalars
         self.resid_lambdas.fill_(1.0)   # 1.0 => typical residual connections at init
@@ -306,6 +328,13 @@ class GPT(nn.Module):
         value_embeds_numel = sum(ve.weight.numel() for ve in self.value_embeds.values())
         nparams_exclude = (self.transformer.wte.weight.numel() + value_embeds_numel +
                           self.resid_lambdas.numel() + self.x0_lambdas.numel())
+        # For MoE layers, only topk/n_experts fraction of expert params are active per token
+        if self.config.use_moe:
+            for block in self.transformer.h:
+                if block.use_moe:
+                    expert_params = sum(p.numel() for expert in block.mlp.experts for p in expert.parameters())
+                    inactive_ratio = 1 - self.config.expert_topk / self.config.n_experts
+                    nparams_exclude += int(expert_params * inactive_ratio)
         h, q, t = self.config.n_head, self.config.n_embd // self.config.n_head, self.config.sequence_len
         # Sum attention FLOPs per layer, accounting for sliding window
         attn_flops = 0
@@ -336,7 +365,7 @@ class GPT(nn.Module):
         scalars = self.resid_lambdas.numel() + self.x0_lambdas.numel()
         total = wte + value_embeds + lm_head + transformer_matrices + scalars
         assert total == sum(p.numel() for p in self.parameters()), "Parameter count mismatch"
-        return {
+        result = {
             'wte': wte,
             'value_embeds': value_embeds,
             'lm_head': lm_head,
@@ -344,6 +373,17 @@ class GPT(nn.Module):
             'scalars': scalars,
             'total': total,
         }
+        # For MoE, also report active params (per-token)
+        if self.config.use_moe:
+            moe_inactive = 0
+            for block in self.transformer.h:
+                if block.use_moe:
+                    expert_params = sum(p.numel() for expert in block.mlp.experts for p in expert.parameters())
+                    inactive_ratio = 1 - self.config.expert_topk / self.config.n_experts
+                    moe_inactive += int(expert_params * inactive_ratio)
+            result['moe_inactive'] = moe_inactive
+            result['active_total'] = total - moe_inactive
+        return result
 
     def setup_optimizer(self, unembedding_lr=0.004, embedding_lr=0.2, matrix_lr=0.02, weight_decay=0.0, adam_betas=(0.8, 0.95), scalar_lr=0.5):
         model_dim = self.config.n_embd
@@ -400,10 +440,12 @@ class GPT(nn.Module):
         x = self.transformer.wte(idx) # embed current token
         x = norm(x)
         x0 = x  # save initial normalized embedding for x0 residual
+        total_aux_loss = 0.0
         for i, block in enumerate(self.transformer.h):
             x = self.resid_lambdas[i] * x + self.x0_lambdas[i] * x0
             ve = self.value_embeds[str(i)](idx) if str(i) in self.value_embeds else None
-            x = block(x, ve, cos_sin, self.window_sizes[i], kv_cache)
+            x, aux_loss = block(x, ve, cos_sin, self.window_sizes[i], kv_cache)
+            total_aux_loss = total_aux_loss + aux_loss
         x = norm(x)
 
         # Forward the lm_head (compute logits)
@@ -417,6 +459,8 @@ class GPT(nn.Module):
             # training: given the targets, compute and return the loss
             # TODO experiment with chunked cross-entropy?
             loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1), ignore_index=-1, reduction=loss_reduction)
+            if self.config.use_moe:
+                return loss, total_aux_loss
             return loss
         else:
             # inference: just return the logits directly

@@ -51,6 +51,13 @@ parser.add_argument("--aspect-ratio", type=int, default=64, help="model_dim = de
 parser.add_argument("--head-dim", type=int, default=128, help="target head dimension for attention")
 parser.add_argument("--max-seq-len", type=int, default=2048, help="max context length")
 parser.add_argument("--window-pattern", type=str, default="SSSL", help="sliding window pattern tiled across layers: L=full, S=half context (e.g. 'SSL')")
+# MoE (Mixture-of-Experts)
+parser.add_argument("--use-moe", action="store_true", help="enable Mixture-of-Experts layers")
+parser.add_argument("--n-experts", type=int, default=8, help="number of experts per MoE layer")
+parser.add_argument("--expert-topk", type=int, default=2, help="number of experts activated per token")
+parser.add_argument("--moe-freq", type=int, default=1, help="every N-th layer uses MoE (1=all layers)")
+parser.add_argument("--expert-hidden-mult", type=int, default=4, help="expert hidden dim multiplier (2 for Iso-FLOPs with topk=2)")
+parser.add_argument("--balance-loss-coeff", type=float, default=0.01, help="coefficient for MoE load balancing loss")
 # Training horizon (only one used, in order of precedence)
 parser.add_argument("--num-iterations", type=int, default=-1, help="explicit number of optimization steps (-1 = disable)")
 parser.add_argument("--target-flops", type=float, default=-1.0, help="calculate num_iterations to reach target_flops (-1 = disable)")
@@ -133,6 +140,9 @@ def build_model_meta(depth):
         sequence_len=args.max_seq_len, vocab_size=vocab_size,
         n_layer=depth, n_head=num_heads, n_kv_head=num_heads, n_embd=model_dim,
         window_pattern=args.window_pattern,
+        use_moe=args.use_moe, n_experts=args.n_experts,
+        expert_topk=args.expert_topk, moe_freq=args.moe_freq,
+        expert_hidden_mult=args.expert_hidden_mult,
     )
     with torch.device("meta"):
         model_meta = GPT(config)
@@ -176,6 +186,10 @@ if args.fp8:
                 return False
             # FP8 requires both in_features and out_features divisible by 16
             if mod.in_features % 16 != 0 or mod.out_features % 16 != 0:
+                return False
+            # Skip MoE expert layers: dynamic token routing produces variable-size tensors
+            # which are incompatible with FP8 scaling under torch.compile
+            if 'experts' in fqn:
                 return False
             return True
 
@@ -257,6 +271,9 @@ def get_scaling_params(m):
     # As for which params to use exactly, transformer matrices + lm_head gives cleanest scaling laws (see dev/LOG.md Jan 27, 2026)
     params_counts = m.num_scaling_params()
     scaling_params = params_counts['transformer_matrices'] + params_counts['lm_head']
+    # For MoE, use active (per-token) params for scaling calculations
+    if 'moe_inactive' in params_counts:
+        scaling_params -= params_counts['moe_inactive']
     return scaling_params
 num_scaling_params = get_scaling_params(model)
 target_tokens = int(args.target_param_data_ratio * num_scaling_params) # optimal tokens for the model we are about to train
@@ -488,11 +505,18 @@ while True:
     # evaluate the gradient
     synchronize()
     t0 = time.time()
+    _balance_loss = None
     for micro_step in range(grad_accum_steps):
         with autocast_ctx:
-            loss = model(x, y)
-        train_loss = loss.detach() # for logging
-        loss = loss / grad_accum_steps # each .backward() is a grad sum => normalize loss here
+            if model_config.use_moe:
+                ce_loss, aux_loss = model(x, y)
+                train_loss = ce_loss.detach()
+                _balance_loss = aux_loss.detach()
+                loss = (ce_loss + args.balance_loss_coeff * aux_loss) / grad_accum_steps
+            else:
+                loss = model(x, y)
+                train_loss = loss.detach() # for logging
+                loss = loss / grad_accum_steps # each .backward() is a grad sum => normalize loss here
         loss.backward()
         x, y, dataloader_state_dict = next(train_loader) # prefetch the next batch while the GPU is busy with forward/backward
     # step the optimizer
@@ -507,6 +531,7 @@ while True:
     optimizer.step()
     model.zero_grad(set_to_none=True)
     train_loss_f = train_loss.item() # .item() is a CPU-GPU sync point
+    balance_loss_f = _balance_loss.item() if _balance_loss is not None else 0.0
     synchronize()
     t1 = time.time()
     dt = t1 - t0
@@ -532,7 +557,8 @@ while True:
     else:
         eta_str = ""
     epoch = dataloader_state_dict["epoch"]
-    print0(f"step {step:05d}/{num_iterations:05d} ({pct_done:.2f}%) | loss: {debiased_smooth_loss:.6f} | lrm: {lrm:.2f} | dt: {dt * 1000:.2f}ms | tok/sec: {tok_per_sec:,} | bf16_mfu: {mfu:.2f} | epoch: {epoch} | total time: {total_training_time/60:.2f}m{eta_str}")
+    balance_str = f" | bal: {balance_loss_f:.4f}" if model_config.use_moe else ""
+    print0(f"step {step:05d}/{num_iterations:05d} ({pct_done:.2f}%) | loss: {debiased_smooth_loss:.6f}{balance_str} | lrm: {lrm:.2f} | dt: {dt * 1000:.2f}ms | tok/sec: {tok_per_sec:,} | bf16_mfu: {mfu:.2f} | epoch: {epoch} | total time: {total_training_time/60:.2f}m{eta_str}")
     if step % 100 == 0:
         log_data = {
             "step": step,
@@ -545,6 +571,8 @@ while True:
             "train/mfu": mfu,
             "train/epoch": epoch,
         }
+        if model_config.use_moe:
+            log_data["train/balance_loss"] = balance_loss_f
         wandb_run.log(log_data)
 
     # state update
