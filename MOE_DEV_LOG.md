@@ -67,22 +67,42 @@ Balance loss coeff: 0.01
 - **Active params (per token)**: ~286M
 - **MoE inactive**: ~170M (experts not selected by router)
 
-### Training Progress (observed at step ~119 / 1733)
-- Cross-entropy loss: 10.4 -> ~4.7 (healthy decrease)
-- Balance loss: stable at ~24.2
-- MFU: ~7%
+### Training Results (completed, 1733 steps)
+- Cross-entropy loss: 10.18 -> 2.99 (smoothed 3.01)
+- Balance loss: stable ~24.0 throughout training
+- MFU: ~8.3% (steady state)
+- Total training time: 25.25 min (8x H800)
+- Total training FLOPs: 7.04e17
+- Checkpoint saved: `test_moe_small/model_001733.pt`
+
+### Evaluation Results (BPB & CORE)
+- **Train BPB**: 0.9012
+- **Val BPB**: 0.9015
+- **CORE metric**: 0.1116
+
+Selected benchmark scores:
+| Benchmark | Accuracy |
+|-----------|----------|
+| HellaSwag (0-shot) | 0.327 |
+| ARC-Easy (10-shot) | 0.514 |
+| ARC-Challenge (10-shot) | 0.257 |
+| PIQA (10-shot) | 0.645 |
+| COPA (0-shot) | 0.570 |
+| Winograd (0-shot) | 0.586 |
+| BoolQ (10-shot) | 0.470 |
+| LAMBADA (0-shot) | 0.273 |
 
 ---
 
 ## Experimental Observations
 
 ### Balance Loss
-- Stable around 24.2 throughout early training
+- Stable around 24.0 throughout training (start to finish)
 - Formula: `N_experts * sum(f_i * P_i)` where perfect balance gives `N_experts * (topk/N_experts)^2 * N_experts = topk^2 / N_experts * N_experts^2`
 - For 8 experts, top-2: theoretical minimum = `8 * 8 * (1/8)^2 = 8 * (2/8) = 2.0` (if perfectly uniform)
-- Observed 24.2 suggests some expert specialization is emerging, which is expected
+- Observed 24.0 suggests some expert specialization is emerging, which is expected
 
-### MFU (~7%)
+### MFU (~8%)
 MFU is lower than typical dense models (~30%+) due to:
 1. **Dynamic shapes**: MoE routing with boolean indexing (`x_flat[mask.any(dim=-1)]`) produces variable-size tensors each step
 2. **torch.compile recompilation**: Hit `recompile_limit` (8) for MoE forward, then falls back to eager mode
