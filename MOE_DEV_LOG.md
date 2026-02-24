@@ -94,6 +94,40 @@ Selected benchmark scores:
 
 ---
 
+## 2026-02-24 Routing Fastpath Study
+
+### What changed
+- Reworked `nanochat/moe.py` dispatch path to group token assignments by expert and accumulate outputs via `index_add_`, replacing repeated boolean-mask scans.
+- Added input validation (`1 <= expert_topk <= n_experts`) in `MoE.__init__`.
+- Removed inline debug-only routines from `nanochat/moe.py` and moved verification into proper unit tests.
+- Added `tests/test_moe.py` with:
+  - numerical equivalence against reference boolean-mask routing
+  - gradient-flow checks for gate and experts
+  - invalid-configuration guard test
+- Added reusable benchmark script `dev/bench_moe_routing.py`.
+
+### Validation
+- Unit tests:
+  - `.venv/bin/python -m pytest tests/test_moe.py -v` -> 3 passed
+- Microbenchmark (single GPU, H800, BF16):
+  - Shape: `B=16, T=1024, D=768, experts=8, topk=2`
+  - Reference path: `2.538 ms`
+  - New path: `1.106 ms`
+  - Speedup: `2.295x`
+  - Output diff: `0.0`, aux diff: `0.0`
+- 8-GPU smoke (`torchrun --nproc_per_node=8`, random-input train steps):
+  - world size: 8
+  - global mean step latency: `13.299 ms`
+  - final loss: `0.020386`
+  - final aux: `2.000000`
+  - status: completed without NaN/divergence
+
+### Artifacts
+- `/mnt/stepeval/yangxiaobo/cache/nanochat/tmp_exp/20260224_072951_moe-routing-microbench/`
+- `/mnt/stepeval/yangxiaobo/cache/nanochat/tmp_exp/20260224_073107_moe-routing-ddp-smoke/`
+
+---
+
 ## Dense vs MoE Iso-FLOPs Comparison
 
 ### Training Configuration (identical except MoE flags)
