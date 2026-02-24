@@ -305,3 +305,58 @@ Interpretation:
 - Handoff docs:
   - `tmp_report/20260224_overall_progress_summary.md`
   - `RESTART_GUIDE.md`
+
+---
+
+## 2026-02-24 Capacity Resume Completion + Optimization Iteration
+
+### Capacity sweep completion (remaining legs)
+
+Resume experiment dir:
+- `/mnt/stepeval/yangxiaobo/cache/nanochat/tmp_exp/20260224_175412_moe-fp8-capacity-ablation-v1-resume`
+
+Completed runs:
+- `moe_fp8_experts_static_cap1p0`
+- `moe_fp8_experts_static_cap1p25`
+- `moe_fp8_experts_dynamic_cap1p0`
+- `moe_fp8_experts_nocompile_cap1p0`
+
+Final tail50 comparison against `cap0.0` baseline:
+
+| run | tok/sec | dt(ms) | mfu | peak mem (MiB) | total time (min) |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| static_cap0p0_baseline | 468782.94 | 1120.38 | 5.6722 | 22790.06 | 5.21 |
+| static_cap1p0 | 785203.42 | 670.31 | 9.5014 | 18983.58 | 3.00 |
+| static_cap1p25 | 747298.44 | 706.31 | 9.0426 | 19722.27 | 3.13 |
+| dynamic_cap1p0 | 749886.60 | 701.27 | 9.0742 | 19057.08 | 3.15 |
+| nocompile_cap1p0 | 363122.12 | 1449.95 | 4.3932 | 22808.69 | 6.34 |
+
+Decision:
+- fixed-capacity `cap1.0` should be the default for FP8+MoE static compile on this setup.
+
+### Small-step optimization: fixed-capacity buffer reuse
+
+Hypothesis:
+- reduce per-expert temporary allocation overhead in fixed-capacity dispatch.
+
+Code:
+- `nanochat/moe.py` fixed-capacity dispatch path now reuses per-forward padded buffers (`all_tokens`, `all_weights`) rather than allocating inside per-expert loops.
+
+Validation:
+- `source .venv/bin/activate && PYTHONPATH=. pytest tests/test_moe.py -q` -> 6 passed.
+
+Optimization run:
+- dir: `/mnt/stepeval/yangxiaobo/cache/nanochat/tmp_exp/20260224_182427_moe-fp8-capacity-opt-v2-buffer`
+- tag: `moe_fp8_experts_static_cap1p0_bufreuse`
+
+Result vs previous static `cap1.0`:
+- tail50 tok/sec: `785203.42 -> 806400.06` (`+2.70%`)
+- tail50 dt: `670.31 -> 650.67 ms` (`-2.93%`)
+- tail50 mfu: `9.5014 -> 9.7588` (`+2.71%`)
+- peak mem: `18983.58 -> 18987.83 MiB` (`+0.02%`)
+- total time: `3.00 -> 2.97 min` (`-1.00%`)
+
+Associated reports:
+- `tmp_report/20260224_1821_capacity_resume_run4_done.md`
+- `tmp_report/20260224_1828_capacity_opt_bufreuse_done.md`
+- `tmp_report/20260224_1829_capacity_opt_bufreuse_vs_cap1p0.md`

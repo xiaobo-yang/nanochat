@@ -1,110 +1,118 @@
-# Nanochat MoE Research Progress Summary (Paused)
+# Nanochat MoE Research Progress Summary
 
-- Generated at: 2026-02-24 17:40 +08:00
+- Generated at: 2026-02-24 19:12 +08:00
 - Repo: `/home/yangxiaobo/my_tools/books/nanochat`
 - Branch: `yxb/moe-add-sft-claude`
-- Status: **Paused by user request**
+- Status: Ready for next optimization iteration (no active run)
 
-## Current Runtime Status
+## Runtime Status
 
-- Active queue/training has been stopped.
-- Verified no active `torchrun`/queue process remains.
-- Verified all 8 GPUs are idle (`0% util`, `0 MiB` used).
+- No active `torchrun` or training queue process.
+- 8 GPUs verified idle at 19:11 +08:00:
+  - GPU0..GPU7: `0% util`, `0 MiB / 81559 MiB`.
 
-## Main Code/Infra Progress
+## Completed Milestones
 
-### 1) Workflow constraints and local agent tooling
+### 1) Capacity ablation remaining legs completed from fresh resume directory
 
-- Added repository-level instructions file: `AGENTS.md`
-- Added local research skill package:
-  - `skills/nanochat-moe-research/SKILL.md`
-  - `skills/nanochat-moe-research/references/experiment-playbook.md`
-  - `skills/nanochat-moe-research/scripts/new_exp.py`
-  - `skills/nanochat-moe-research/agents/openai.yaml`
+Baseline directory:
+- `/mnt/stepeval/yangxiaobo/cache/nanochat/tmp_exp/20260224_172715_moe-fp8-capacity-ablation-v1`
 
-### 2) MoE capacity-factor feature (core change)
+Fresh resumed directory:
+- `/mnt/stepeval/yangxiaobo/cache/nanochat/tmp_exp/20260224_175412_moe-fp8-capacity-ablation-v1-resume`
 
-- Added fixed-capacity MoE dispatch support via `--moe-capacity-factor`
-- Plumbed config through training/model stack:
-  - `scripts/base_train.py`
-  - `nanochat/gpt.py`
-  - `nanochat/moe.py`
-- Added tests for capacity-factor behavior:
-  - `tests/test_moe.py`
+Runs completed:
+- `static + cap1.0`
+- `static + cap1.25`
+- `dynamic + cap1.0`
+- `nocompile + cap1.0`
 
-### 3) Experiment automation and reporting
+Final comparison (tail50 window):
 
-- Added/updated queue scripts for 8-GPU ablations:
-  - `runs/moe_fp8_capacity_ablation_queue.sh`
-- Added/used report generation script:
-  - `tmp_report/generate_moe_fp8_ablation_report.py`
-- Maintained periodic markdown snapshots and figure/csv artifacts under `tmp_report/`
+| run | tail50 tok/sec | tail50 dt (ms) | tail50 mfu | peak mem (MiB) | total time (min) |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| static_cap0p0_baseline | 468782.94 | 1120.38 | 5.6722 | 22790.06 | 5.21 |
+| static_cap1p0 | 785203.42 | 670.31 | 9.5014 | 18983.58 | 3.00 |
+| static_cap1p25 | 747298.44 | 706.31 | 9.0426 | 19722.27 | 3.13 |
+| dynamic_cap1p0 | 749886.60 | 701.27 | 9.0742 | 19057.08 | 3.15 |
+| nocompile_cap1p0 | 363122.12 | 1449.95 | 4.3932 | 22808.69 | 6.34 |
 
-## Experiment Progress
+Conclusion:
+- Fixed-capacity `cap1.0` static is the best default on this workload.
+- `cap1.25` is worse than `cap1.0` on throughput/latency and uses more memory.
+- `nocompile` remains clearly slower and higher-memory.
 
-## A. Compile Sweep V1 (Completed)
+Primary report files:
+- `tmp_report/20260224_1821_capacity_resume_run4_done.md`
+- `tmp_report/20260224_1829_capacity_opt_bufreuse_vs_cap1p0.md`
 
-- Experiment dir:
-  `/mnt/stepeval/yangxiaobo/cache/nanochat/tmp_exp/20260224_164636_moe-fp8-compile-sweep-v1`
-- Launch log shows queue completed successfully.
+### 2) Next-round small optimization implemented and verified
 
-| run | status | steps | tail50 tok/sec | tail50 dt(ms) | tail50 mfu | peak mem (MiB) | total time (min) |
-| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| `moe_bf16_experts_static_long` | completed | 360 | 1,080,430.24 | 487.11 | 13.0732 | 23,428.52 | 3.31 |
-| `moe_fp8_noexperts_static_long` | completed | 360 | 1,039,883.30 | 505.19 | 12.5836 | 23,234.33 | 3.50 |
-| `moe_fp8_experts_dynamic_long_retest` | completed | 360 | 785,495.06 | 669.74 | 9.5050 | 19,668.76 | 4.06 |
-| `moe_fp8_experts_static_long` | completed | 360 | 474,178.48 | 1107.05 | 5.7366 | 22,790.91 | 6.67 |
-| `moe_bf16_experts_nocompile_long_retest` | completed | 360 | 1,045,350.76 | 503.93 | 12.6498 | 23,433.47 | 3.41 |
-| `moe_fp8_experts_nocompile_long_retest` | completed | 360 | 359,711.14 | 1462.56 | 4.3524 | 22,862.51 | 8.53 |
+Hypothesis:
+- reduce allocation churn in fixed-capacity dispatch by reusing padded per-forward buffers.
 
-## B. Capacity Ablation V1 (Partially Completed, then manually paused)
+Code:
+- `nanochat/moe.py` (fixed-capacity path buffer reuse)
 
-- Experiment dir:
-  `/mnt/stepeval/yangxiaobo/cache/nanochat/tmp_exp/20260224_172715_moe-fp8-capacity-ablation-v1`
-- Queue progression before pause:
-  - `17:29:03` start `moe_fp8_experts_static_cap0p0`
-  - `17:35:07` finish `moe_fp8_experts_static_cap0p0` status=0
-  - `17:35:08` start `moe_fp8_experts_static_cap1p0`
-  - `17:36:49` finish `moe_fp8_experts_static_cap1p0` status=1
-  - `17:36:50` start `moe_fp8_experts_static_cap1p25`
-- Pause action sent `SIGINT` to queue/torchrun, so run2/run3 are incomplete by design.
+Validation:
+- `source .venv/bin/activate && PYTHONPATH=. pytest tests/test_moe.py -q` -> 6 passed
 
-| run | status at pause | steps observed | last step | tail50 tok/sec | tail50 dt(ms) | tail50 mfu | notes |
-| --- | --- | ---: | ---: | ---: | ---: | ---: | --- |
-| `moe_fp8_experts_static_cap0p0` | completed | 280 | 279/280 | 468,782.94 | 1120.38 | 5.6722 | completed normally |
-| `moe_fp8_experts_static_cap1p0` | interrupted | 107 | 106/280 | 783,041.76 | 670.11 | 9.4742 | interrupted by user-requested stop (KeyboardInterrupt) |
-| `moe_fp8_experts_static_cap1p25` | not started effectively | 0 | - | - | - | - | empty log due immediate pause after queue handoff |
+Experiment directory:
+- `/mnt/stepeval/yangxiaobo/cache/nanochat/tmp_exp/20260224_182427_moe-fp8-capacity-opt-v2-buffer`
 
-## Key Findings So Far
+Result (`moe_fp8_experts_static_cap1p0_bufreuse`):
+- tail50 tok/sec: `806400.06`
+- tail50 dt: `650.67 ms`
+- tail50 mfu: `9.7588`
+- peak mem: `18987.83 MiB`
+- total time: `2.97 min`
 
-1. FP8 + experts under static compile without fixed capacity (`cap0.0`) remains much slower than BF16/static and FP8/no-experts baselines.
-2. Introducing fixed capacity (`cap1.0`) showed a large throughput lift in the partial run (from ~469k to ~783k tok/sec tail window), suggesting capacity stabilization may reduce compile/recompile pathologies.
-3. Capacity-ablation queue needs rerun from `cap1.0` onward to obtain complete apples-to-apples final metrics (total_time, peak_mem, stable tail windows).
+Delta vs previous static `cap1.0`:
+- tok/sec `+2.70%`
+- dt `-2.93%`
+- mfu `+2.71%`
+- peak mem `+0.02%`
+- total time `-1.00%`
 
-## Recent Commits (Top)
+Supporting report files:
+- `tmp_report/20260224_1828_capacity_opt_bufreuse_done.md`
+- `tmp_report/20260224_1829_capacity_opt_bufreuse_vs_cap1p0.md`
 
-- `3636a35` report: capture cap0.0 completion and cap1.0 warm-start transition
-- `331ce28` report: snapshot live metrics for capacity sweep run1 (cap0.0 static fp8)
-- `99b6b55` report: capture run5 completion and run6 live ramp in compile_sweep_v1
-- `44c94a9` moe: add fixed-capacity dispatch mode and capacity ablation queue
-- `287b302` report: log run4 completion and run5 nocompile live regression
-- `a9d3934` report: record run3 completion and run4 dynamic throughput recovery
+## Latest Relevant Commits
 
-## Important Artifact Paths
+- `ba52023` report: add buffer-reuse optimization run and final capacity comparison snapshot
+- `452d3f4` moe: reduce fixed-capacity dispatch allocations with per-forward padded buffers
+- `4967ca2` report: finalize capacity resume run4 (nocompile cap1.0) and full four-leg sweep
+- `06bbdd9` report: complete capacity resume run3 dynamic cap1.0
+- `bc5bd1e` report: complete capacity resume run2 static cap1.25 and snapshot metrics
+- `c2b6587` report: complete resumed capacity leg static+cap1.0 with fresh exp dir
 
-- Compile sweep v1:
-  `/mnt/stepeval/yangxiaobo/cache/nanochat/tmp_exp/20260224_164636_moe-fp8-compile-sweep-v1`
-- Capacity ablation v1:
-  `/mnt/stepeval/yangxiaobo/cache/nanochat/tmp_exp/20260224_172715_moe-fp8-capacity-ablation-v1`
-- Ongoing report outputs:
-  `tmp_report/`
+## Resume Commands (for new Codex session)
 
-## Resume Checklist (when restarting work)
+```bash
+cd /home/yangxiaobo/my_tools/books/nanochat
+git checkout yxb/moe-add-sft-claude
+git status --short --branch
+source .venv/bin/activate
+```
 
-1. Resume from branch `yxb/moe-add-sft-claude`.
-2. Relaunch capacity ablation from a fresh directory under `/mnt/stepeval/yangxiaobo/cache/nanochat/tmp_exp/`.
-3. Re-run `cap1.0`, `cap1.25`, `dynamic cap1.0`, `nocompile cap1.0` to completion.
-4. Regenerate summary plots and compare against `cap0.0` and compile_sweep_v1 baselines.
+Before any `torchrun`, always run:
 
-Detailed run commands and continuation procedure are documented in:
-- `RESTART_GUIDE.md`
+```bash
+source .venv/bin/activate
+```
+
+Start next optimization run with a fresh experiment directory only:
+
+```bash
+source .venv/bin/activate
+EXP_DIR="/mnt/stepeval/yangxiaobo/cache/nanochat/tmp_exp/$(date +%Y%m%d_%H%M%S)_moe-fp8-capacity-opt-v3-<tag>"
+mkdir -p "$EXP_DIR/ckpt_root"
+```
+
+## Constraints Reminder
+
+- Keep branch at `yxb/moe-add-sft-claude`.
+- Write checkpoints/artifacts only under `/mnt/stepeval/yangxiaobo/cache/nanochat/tmp_exp/`.
+- Do not modify other paths under `/mnt/stepeval/yangxiaobo/cache/nanochat`.
+- Preserve unrelated user files and dirty/untracked content.
