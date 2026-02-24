@@ -1,7 +1,2 @@
 run,status,steps_observed,last_step,last_loss,tail50_tok_sec,tail50_bf16_mfu,tail50_dt_ms,peak_mem_mib,total_time_min,error_line
-moe_bf16_experts_nocompile_long_retest,running,60,59,5.513342,601536.34,7.2790,996.14,,,
-moe_bf16_experts_static_long,completed,360,359,3.521940,1080430.24,13.0732,487.11,23428.52,3.31,
-moe_fp8_experts_dynamic_long_retest,completed,360,359,3.532222,785495.06,9.5050,669.74,19668.76,4.06,
-moe_fp8_experts_nocompile_long_retest,completed,360,359,3.531753,359711.14,4.3524,1462.56,22862.51,8.53,
-moe_fp8_experts_static_long,completed,360,359,3.531475,474178.48,5.7366,1107.05,22790.91,6.67,
-moe_fp8_noexperts_static_long,completed,360,359,3.530226,1039883.30,12.5836,505.19,23234.33,3.50,
+moe_fp8_experts_static_cap0p0,running,90,89,5.112689,434792.42,5.2616,1207.88,,,
