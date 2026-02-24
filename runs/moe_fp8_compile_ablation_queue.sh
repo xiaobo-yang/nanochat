@@ -132,24 +132,67 @@ run_one() {
   return "${status}"
 }
 
-run_one "moe_fp8_experts_dynamic_long" \
-  --compile-mode dynamic \
-  --fp8 \
-  --fp8-include-moe-experts || true
+run_profile_default() {
+  run_one "moe_fp8_experts_dynamic_long" \
+    --compile-mode dynamic \
+    --fp8 \
+    --fp8-include-moe-experts || true
 
-run_one "moe_fp8_dynamic_noexpertfp8_long" \
-  --compile-mode dynamic \
-  --fp8 || true
+  run_one "moe_fp8_dynamic_noexpertfp8_long" \
+    --compile-mode dynamic \
+    --fp8 || true
 
-run_one "moe_bf16_experts_dynamic_long" \
-  --compile-mode dynamic || true
+  run_one "moe_bf16_experts_dynamic_long" \
+    --compile-mode dynamic || true
 
-run_one "moe_fp8_experts_nocompile_long" \
-  --compile-mode none \
-  --fp8 \
-  --fp8-include-moe-experts || true
+  run_one "moe_fp8_experts_nocompile_long" \
+    --compile-mode none \
+    --fp8 \
+    --fp8-include-moe-experts || true
 
-run_one "moe_bf16_experts_nocompile_long" \
-  --compile-mode none || true
+  run_one "moe_bf16_experts_nocompile_long" \
+    --compile-mode none || true
+}
+
+run_profile_compile_sweep_v1() {
+  run_one "moe_bf16_experts_static_long" \
+    --compile-mode static || true
+
+  run_one "moe_fp8_noexperts_static_long" \
+    --compile-mode static \
+    --fp8 || true
+
+  run_one "moe_fp8_experts_static_long" \
+    --compile-mode static \
+    --fp8 \
+    --fp8-include-moe-experts || true
+
+  run_one "moe_fp8_experts_dynamic_long_retest" \
+    --compile-mode dynamic \
+    --fp8 \
+    --fp8-include-moe-experts || true
+
+  run_one "moe_fp8_experts_nocompile_long_retest" \
+    --compile-mode none \
+    --fp8 \
+    --fp8-include-moe-experts || true
+
+  run_one "moe_bf16_experts_nocompile_long_retest" \
+    --compile-mode none || true
+}
+
+QUEUE_PROFILE="${QUEUE_PROFILE:-default}"
+case "${QUEUE_PROFILE}" in
+  default)
+    run_profile_default
+    ;;
+  compile_sweep_v1)
+    run_profile_compile_sweep_v1
+    ;;
+  *)
+    echo "[queue ${QUEUE_TAG} $(date -Iseconds)] unknown QUEUE_PROFILE=${QUEUE_PROFILE}" | tee -a "${LAUNCH_LOG}"
+    exit 2
+    ;;
+esac
 
 echo "[queue ${QUEUE_TAG} $(date -Iseconds)] queue done" | tee -a "${LAUNCH_LOG}"
