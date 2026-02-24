@@ -1,4 +1,2 @@
 run,status,steps_observed,last_step,last_loss,tail50_tok_sec,tail50_bf16_mfu,tail50_dt_ms,peak_mem_mib,total_time_min,error_line
-moe_fp8_experts_static_cap0p0,completed,280,279,3.718175,468782.94,5.6722,1120.38,22790.06,5.21,
-moe_fp8_experts_static_cap1p0,running,107,106,4.885892,783041.76,9.4742,670.11,,,
-moe_fp8_experts_static_cap1p25,unknown,0,,,,,,,,
+moe_fp8_experts_static_cap1p0,completed,280,279,3.724237,785203.42,9.5014,670.31,18983.58,3.00,
