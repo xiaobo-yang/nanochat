@@ -29,6 +29,15 @@
   - `notes.md`: hypothesis, expected result, observed result.
   - `metrics.json` or `metrics.md`: key numbers and checkpoints.
 
+## Session Handoff
+- When pausing work, update continuation docs before ending the session:
+  - `RESTART_GUIDE.md`
+  - `tmp_report/20260224_overall_progress_summary.md` (or newer timestamped summary)
+- Ensure paused-state status is reproducible:
+  - record active/finished runs and exact experiment directories
+  - record whether GPUs are idle or busy
+  - include exact resume commands using `source .venv/bin/activate`
+
 ## Commit Discipline
 - Commit frequently at milestone boundaries:
   - docs/skills baseline

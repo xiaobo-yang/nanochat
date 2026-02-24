@@ -105,3 +105,6 @@
 2. Relaunch capacity ablation from a fresh directory under `/mnt/stepeval/yangxiaobo/cache/nanochat/tmp_exp/`.
 3. Re-run `cap1.0`, `cap1.25`, `dynamic cap1.0`, `nocompile cap1.0` to completion.
 4. Regenerate summary plots and compare against `cap0.0` and compile_sweep_v1 baselines.
+
+Detailed run commands and continuation procedure are documented in:
+- `RESTART_GUIDE.md`

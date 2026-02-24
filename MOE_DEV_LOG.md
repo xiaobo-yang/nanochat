@@ -249,3 +249,59 @@ Benefits:
 - Investigate grouped GEMM / fused MoE kernels for better GPU utilization
 - Consider capacity factor + token dropping for fixed-shape tensors (enables FP8 + torch.compile)
 - Profile to identify the actual bottleneck between compute and memory bandwidth
+
+---
+
+## 2026-02-24 Throughput Study Update (FP8 + MoE)
+
+### Code and Experiment Infra Added
+- Implemented fixed-capacity MoE dispatch controlled by `--moe-capacity-factor`.
+- Wired config end-to-end in:
+  - `scripts/base_train.py`
+  - `nanochat/gpt.py`
+  - `nanochat/moe.py`
+- Added tests in `tests/test_moe.py` for capacity validation and fixed-capacity forward/backward smoke.
+- Added queue runner for capacity ablation:
+  - `runs/moe_fp8_capacity_ablation_queue.sh`
+
+### Compile Sweep V1 (Completed)
+Experiment:
+- `/mnt/stepeval/yangxiaobo/cache/nanochat/tmp_exp/20260224_164636_moe-fp8-compile-sweep-v1`
+
+Headline throughput (tail50 tok/sec):
+- `moe_bf16_experts_static_long`: `1,080,430`
+- `moe_fp8_noexperts_static_long`: `1,039,883`
+- `moe_fp8_experts_dynamic_long_retest`: `785,495`
+- `moe_fp8_experts_static_long`: `474,178`
+- `moe_bf16_experts_nocompile_long_retest`: `1,045,351`
+- `moe_fp8_experts_nocompile_long_retest`: `359,711`
+
+Interpretation:
+- FP8+MoE static remained significantly slower than dense/no-expert baselines.
+- Dynamic compile improved FP8+MoE throughput over static.
+
+### Capacity Ablation V1 (Paused Mid-run)
+Experiment:
+- `/mnt/stepeval/yangxiaobo/cache/nanochat/tmp_exp/20260224_172715_moe-fp8-capacity-ablation-v1`
+
+Observed before pause:
+- `cap0.0 static` completed:
+  - tail50 tok/sec: `468,782.94`
+  - tail50 dt: `1120.38 ms`
+  - tail50 mfu: `5.6722`
+  - total time: `5.21 min`
+- `cap1.0 static` interrupted intentionally at step `106/280` due to pause:
+  - partial tail-window tok/sec: `783,041.76`
+  - partial tail-window dt: `670.11 ms`
+- `cap1.25 static` did not effectively start (empty log).
+
+Interpretation:
+- Partial `cap1.0` data suggests major throughput uplift vs `cap0.0`.
+- Need full rerun of remaining legs for robust decision.
+
+### Pause/Handoff State
+- Queue and torchrun were stopped by user request.
+- GPUs were verified idle after stop.
+- Handoff docs:
+  - `tmp_report/20260224_overall_progress_summary.md`
+  - `RESTART_GUIDE.md`
