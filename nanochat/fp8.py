@@ -87,6 +87,11 @@ def _to_fp8(x, fp8_dtype):
     Returns (fp8_data, inverse_scale) for use with torch._scaled_mm.
     """
     fp8_max = torch.finfo(fp8_dtype).max
+    # MoE expert dispatch can produce empty [0, D] tensors.
+    # max() on empty tensors is undefined, so short-circuit with identity scale.
+    if x.numel() == 0:
+        inv_scale = torch.ones((), device=x.device, dtype=torch.float32)
+        return x.to(fp8_dtype), inv_scale
     # Compute the max absolute value across the entire tensor
     amax = x.float().abs().max()
     # Scale maps [0, amax] -> [0, fp8_max]. Use float64 for the division to

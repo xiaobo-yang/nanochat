@@ -45,6 +45,8 @@ parser.add_argument("--device-type", type=str, default="", help="cuda|cpu|mps (e
 # FP8 training
 parser.add_argument("--fp8", action="store_true", help="enable FP8 training (requires H100+ GPU and torchao)")
 parser.add_argument("--fp8-recipe", type=str, default="tensorwise", choices=["rowwise", "tensorwise"], help="FP8 scaling recipe: tensorwise (faster, recommended) or rowwise (more accurate but slower)")
+parser.add_argument("--fp8-include-moe-experts", action="store_true", help="also convert MoE expert Linear layers to FP8")
+parser.add_argument("--compile-mode", type=str, default="auto", choices=["auto", "static", "dynamic"], help="torch.compile mode; auto uses dynamic for MoE, static otherwise")
 # Model architecture
 parser.add_argument("--depth", type=int, default=20, help="depth of the Transformer model")
 parser.add_argument("--aspect-ratio", type=int, default=64, help="model_dim = depth * aspect_ratio")
@@ -85,6 +87,7 @@ parser.add_argument("--sample-every", type=int, default=2000, help="sample from 
 parser.add_argument("--save-every", type=int, default=-1, help="save checkpoints every N steps (-1 = only at end)")
 # Output
 parser.add_argument("--model-tag", type=str, default=None, help="override model tag for checkpoint directory name")
+parser.add_argument("--checkpoint-root", type=str, default="", help="optional root for checkpoint output (e.g. /mnt/.../tmp_exp)")
 args = parser.parse_args()
 user_config = vars(args).copy()  # for logging
 # -----------------------------------------------------------------------------
@@ -159,7 +162,10 @@ model.init_weights() # 3) All tensors get initialized
 # If we are resuming, overwrite the model parameters with those of the checkpoint
 base_dir = get_base_dir()
 output_dirname = args.model_tag if args.model_tag else f"d{args.depth}" # e.g. d12
-checkpoint_dir = os.path.join(base_dir, "base_checkpoints", output_dirname)
+checkpoint_root = args.checkpoint_root if args.checkpoint_root else base_dir
+checkpoint_dir = os.path.join(checkpoint_root, "base_checkpoints", output_dirname)
+if master_process:
+    print0(f"Checkpoint dir: {checkpoint_dir}")
 resuming = args.resume_from_step != -1
 if resuming:
     print0(f"Resuming optimization from step {args.resume_from_step}")
@@ -188,8 +194,8 @@ if args.fp8:
             if mod.in_features % 16 != 0 or mod.out_features % 16 != 0:
                 return False
             # Skip MoE expert layers: dynamic token routing produces variable-size tensors
-            # which are incompatible with FP8 scaling under torch.compile
-            if 'experts' in fqn:
+            # unless explicitly requested.
+            if (not args.fp8_include_moe_experts) and ('experts' in fqn):
                 return False
             return True
 
@@ -197,7 +203,11 @@ if args.fp8:
         convert_to_float8_training(model, config=fp8_config, module_filter_fn=fp8_module_filter)
         num_fp8_layers = sum(1 for m in model.modules() if 'Float8' in type(m).__name__)
         num_skipped = sum(1 for m in model.modules() if isinstance(m, nn.Linear)) - num_fp8_layers
-        print0(f"✓ FP8 training enabled ({args.fp8_recipe} scaling) - converted {num_fp8_layers} layers, skipped {num_skipped} (dims not divisible by 16)")
+        moe_expert_state = "included" if args.fp8_include_moe_experts else "excluded"
+        print0(
+            f"✓ FP8 training enabled ({args.fp8_recipe} scaling, MoE experts {moe_expert_state}) "
+            f"- converted {num_fp8_layers} layers, skipped {num_skipped} (dims not divisible by 16)"
+        )
 
 # Context manager to temporarily disable FP8 so that model evaluation remains in BF16
 @contextmanager
@@ -250,7 +260,9 @@ def disable_fp8(model):
 # Compile the model
 
 orig_model = model # original, uncompiled model, for saving raw model state_dict and for inference/evaluation (because the shapes may change shape)
-model = torch.compile(model, dynamic=False) # the inputs to model will never change shape so dynamic=False is safe
+compile_dynamic = args.compile_mode == "dynamic" or (args.compile_mode == "auto" and args.use_moe)
+print0(f"torch.compile(dynamic={compile_dynamic}) [compile_mode={args.compile_mode}]")
+model = torch.compile(model, dynamic=compile_dynamic)
 
 # -----------------------------------------------------------------------------
 # Scaling laws and muP extrapolations to determine the optimal training horizon, batch size, learning rates, weight decay.

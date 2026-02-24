@@ -11,6 +11,11 @@ import torch
 import torch.distributed as dist
 from torch import Tensor
 
+def _grad_or_zeros(p: Tensor) -> Tensor:
+    """Return parameter gradient, or a zero tensor if this step produced no grad."""
+    grad = p.grad
+    return grad if grad is not None else torch.zeros_like(p)
+
 # -----------------------------------------------------------------------------
 """
 Good old AdamW optimizer, fused kernel.
@@ -254,7 +259,7 @@ class MuonAdamW(torch.optim.Optimizer):
         red_dim = -1 if shape[-2] >= shape[-1] else -2
 
         # Stack grads and params (NOTE: this assumes all params have the same shape)
-        stacked_grads = torch.stack([p.grad for p in params])
+        stacked_grads = torch.stack([_grad_or_zeros(p) for p in params])
         stacked_params = torch.stack(params)
 
         # Fill all the 0-D tensors with current values
@@ -370,7 +375,7 @@ class DistMuonAdamW(torch.optim.Optimizer):
         """Launch async reduce ops for AdamW group. Returns info dict with per-param infos."""
         param_infos = {}
         for p in group['params']:
-            grad = p.grad
+            grad = _grad_or_zeros(p)
             if p.numel() < 1024:
                 # Small params: all_reduce (no scatter/gather needed)
                 future = dist.all_reduce(grad, op=dist.ReduceOp.AVG, async_op=True).get_future()
@@ -393,7 +398,7 @@ class DistMuonAdamW(torch.optim.Optimizer):
         shape, device, dtype = p.shape, p.device, p.dtype
 
         # Stack grads and zero-pad to padded_num_params
-        grad_stack = torch.stack([p.grad for p in params])
+        grad_stack = torch.stack([_grad_or_zeros(p) for p in params])
         stacked_grads = torch.empty(padded_num_params, *shape, dtype=dtype, device=device)
         stacked_grads[:len(params)].copy_(grad_stack)
         if len(params) < padded_num_params:
