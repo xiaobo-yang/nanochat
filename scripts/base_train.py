@@ -268,9 +268,18 @@ else:
     # TorchInductor's coalesce tiling analysis is known to be unstable with
     # dynamic shapes; disable it for dynamic compile to avoid SymPy assertion
     # failures during backward graph codegen.
-    if compile_dynamic and "TORCHINDUCTOR_COALESCE_TILING_ANALYSIS" not in os.environ:
-        os.environ["TORCHINDUCTOR_COALESCE_TILING_ANALYSIS"] = "0"
-        print0("Set TORCHINDUCTOR_COALESCE_TILING_ANALYSIS=0 for dynamic compile stability")
+    if compile_dynamic:
+        if "TORCHINDUCTOR_TRITON_COALESCE_TILING_ANALYSIS" not in os.environ:
+            os.environ["TORCHINDUCTOR_TRITON_COALESCE_TILING_ANALYSIS"] = "0"
+            print0("Set TORCHINDUCTOR_TRITON_COALESCE_TILING_ANALYSIS=0 for dynamic compile stability")
+        # Keep legacy name for older torch builds that still parse this env var.
+        os.environ.setdefault("TORCHINDUCTOR_COALESCE_TILING_ANALYSIS", "0")
+        try:
+            import torch._inductor.config as inductor_config
+            inductor_config.triton.coalesce_tiling_analysis = False
+            print0("Set torch._inductor.config.triton.coalesce_tiling_analysis=False for dynamic compile stability")
+        except Exception as e:
+            print0(f"Warning: failed to patch torch._inductor.config for dynamic compile: {e}")
     print0(f"torch.compile(dynamic={compile_dynamic}) [compile_mode={args.compile_mode}]")
     model = torch.compile(model, dynamic=compile_dynamic)
 
