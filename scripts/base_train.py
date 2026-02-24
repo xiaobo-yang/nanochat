@@ -46,7 +46,7 @@ parser.add_argument("--device-type", type=str, default="", help="cuda|cpu|mps (e
 parser.add_argument("--fp8", action="store_true", help="enable FP8 training (requires H100+ GPU and torchao)")
 parser.add_argument("--fp8-recipe", type=str, default="tensorwise", choices=["rowwise", "tensorwise"], help="FP8 scaling recipe: tensorwise (faster, recommended) or rowwise (more accurate but slower)")
 parser.add_argument("--fp8-include-moe-experts", action="store_true", help="also convert MoE expert Linear layers to FP8")
-parser.add_argument("--compile-mode", type=str, default="auto", choices=["auto", "static", "dynamic"], help="torch.compile mode; auto uses dynamic for MoE, static otherwise")
+parser.add_argument("--compile-mode", type=str, default="auto", choices=["auto", "static", "dynamic", "none"], help="torch.compile mode; auto uses dynamic for MoE, static otherwise; none disables torch.compile")
 # Model architecture
 parser.add_argument("--depth", type=int, default=20, help="depth of the Transformer model")
 parser.add_argument("--aspect-ratio", type=int, default=64, help="model_dim = depth * aspect_ratio")
@@ -260,9 +260,19 @@ def disable_fp8(model):
 # Compile the model
 
 orig_model = model # original, uncompiled model, for saving raw model state_dict and for inference/evaluation (because the shapes may change shape)
-compile_dynamic = args.compile_mode == "dynamic" or (args.compile_mode == "auto" and args.use_moe)
-print0(f"torch.compile(dynamic={compile_dynamic}) [compile_mode={args.compile_mode}]")
-model = torch.compile(model, dynamic=compile_dynamic)
+if args.compile_mode == "none":
+    compile_dynamic = False
+    print0(f"torch.compile disabled [compile_mode={args.compile_mode}]")
+else:
+    compile_dynamic = args.compile_mode == "dynamic" or (args.compile_mode == "auto" and args.use_moe)
+    # TorchInductor's coalesce tiling analysis is known to be unstable with
+    # dynamic shapes; disable it for dynamic compile to avoid SymPy assertion
+    # failures during backward graph codegen.
+    if compile_dynamic and "TORCHINDUCTOR_COALESCE_TILING_ANALYSIS" not in os.environ:
+        os.environ["TORCHINDUCTOR_COALESCE_TILING_ANALYSIS"] = "0"
+        print0("Set TORCHINDUCTOR_COALESCE_TILING_ANALYSIS=0 for dynamic compile stability")
+    print0(f"torch.compile(dynamic={compile_dynamic}) [compile_mode={args.compile_mode}]")
+    model = torch.compile(model, dynamic=compile_dynamic)
 
 # -----------------------------------------------------------------------------
 # Scaling laws and muP extrapolations to determine the optimal training horizon, batch size, learning rates, weight decay.
