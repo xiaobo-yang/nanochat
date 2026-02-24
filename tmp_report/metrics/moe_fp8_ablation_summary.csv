@@ -1,17 +1,3 @@
 run,status,steps_observed,last_step,last_loss,tail50_tok_sec,tail50_bf16_mfu,tail50_dt_ms,peak_mem_mib,total_time_min,error_line
-moe_fp8_noexperts_static,completed,140,139,4.671589,982069.86,11.8842,537.75,23231.91,1.59,
-moe_fp8_experts_static,completed,140,139,4.673486,475081.42,5.7496,1104.40,22790.56,2.54,
-moe_fp8_experts_dynamic,failed,1,0,10.397762,12912.00,0.1600,40602.17,,,InductorError: AssertionError: -859663773703483/1000000000000000
-moe_fp8_experts_dynamic_coalesce0,failed,1,0,10.397762,30071.00,0.3600,17434.83,,,InductorError: AssertionError: -168373925552093/200000000000000
-moe_fp8_experts_nocompile,completed,140,139,4.673790,367435.48,4.4458,1427.60,22867.05,3.23,
-moe_fp8_experts_static_repeat,completed,140,139,4.674189,478362.16,5.7888,1097.02,22787.25,2.54,
-moe_fp8_experts_nocompile_repeat2,completed,140,139,4.672930,364788.90,4.4134,1440.62,22864.65,3.23,
-moe_bf16_experts_dynamic,completed,140,139,4.660481,947987.46,11.4710,556.61,21107.20,1.71,
-moe_bf16_experts_dynamic_long,completed,360,359,3.522239,1038953.14,12.5716,508.81,21101.70,3.65,
-moe_bf16_experts_nocompile_long,completed,360,359,3.522287,1029301.24,12.4546,512.33,23427.59,3.42,
-moe_fp8_dynamic_noexpertfp8,completed,140,139,4.673888,913355.96,11.0518,579.55,20979.88,1.73,
-moe_fp8_dynamic_noexpertfp8_long,completed,360,359,3.528897,963503.82,11.6596,545.02,20983.23,3.89,
-moe_fp8_experts_dynamic_coalesce0_retry2,completed,140,139,4.672379,781337.72,9.4542,673.00,19669.95,1.64,
-moe_fp8_experts_dynamic_long,completed,360,359,3.531004,799037.72,9.6684,657.40,19665.65,4.08,
-moe_fp8_experts_nocompile_long,completed,360,359,3.531636,366418.66,4.4342,1434.67,22867.05,8.46,
-moe_fp8_experts_static.fail1,failed,1,0,10.397762,40703.00,0.4900,12880.75,,,"RuntimeError: Expected self.size(1) to be divisible by 16, but got self.size(1)=5420"
+moe_bf16_experts_static_long,completed,360,359,3.521940,1080430.24,13.0732,487.11,23428.52,3.31,
+moe_fp8_noexperts_static_long,running,7,6,8.007448,243418.29,2.9457,3108.70,,,
