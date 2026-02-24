@@ -16,6 +16,7 @@ class DummyConfig:
     n_experts: int = 4
     expert_topk: int = 2
     expert_hidden_mult: int = 2
+    moe_capacity_factor: float = 0.0
 
 
 def _reference_forward(model: MoE, x: torch.Tensor):
@@ -84,3 +85,47 @@ def test_moe_rejects_invalid_topk():
         assert "expert_topk" in str(exc)
     else:
         raise AssertionError("MoE must reject expert_topk > n_experts")
+
+
+def test_moe_rejects_negative_capacity_factor():
+    bad = DummyConfig(moe_capacity_factor=-1.0)
+    try:
+        MoE(bad)
+    except ValueError as exc:
+        assert "moe_capacity_factor" in str(exc)
+    else:
+        raise AssertionError("MoE must reject negative moe_capacity_factor")
+
+
+def test_moe_fixed_capacity_matches_exact_when_single_expert():
+    torch.manual_seed(7)
+    x = torch.randn(2, 4, 16)
+
+    cfg_exact = DummyConfig(n_experts=1, expert_topk=1, moe_capacity_factor=0.0)
+    cfg_cap = DummyConfig(n_experts=1, expert_topk=1, moe_capacity_factor=1.0)
+
+    model_exact = MoE(cfg_exact)
+    model_cap = MoE(cfg_cap)
+    model_cap.load_state_dict(model_exact.state_dict())
+
+    out_exact, aux_exact = model_exact(x)
+    out_cap, aux_cap = model_cap(x)
+
+    assert torch.allclose(out_cap, out_exact, atol=1e-6, rtol=1e-5)
+    assert torch.allclose(aux_cap, aux_exact, atol=1e-6, rtol=1e-5)
+
+
+def test_moe_fixed_capacity_forward_backward_runs():
+    torch.manual_seed(99)
+    cfg = DummyConfig(n_experts=4, expert_topk=2, moe_capacity_factor=0.6)
+    model = MoE(cfg)
+    x = torch.randn(3, 5, cfg.n_embd)
+
+    out, aux = model(x)
+    assert out.shape == x.shape
+    assert torch.isfinite(out).all()
+    assert torch.isfinite(aux)
+
+    loss = out.square().mean() + 0.1 * aux
+    loss.backward()
+    assert model.gate.weight.grad is not None

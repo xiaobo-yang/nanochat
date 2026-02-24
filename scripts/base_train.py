@@ -59,6 +59,7 @@ parser.add_argument("--n-experts", type=int, default=8, help="number of experts 
 parser.add_argument("--expert-topk", type=int, default=2, help="number of experts activated per token")
 parser.add_argument("--moe-freq", type=int, default=1, help="every N-th layer uses MoE (1=all layers)")
 parser.add_argument("--expert-hidden-mult", type=int, default=4, help="expert hidden dim multiplier (2 for Iso-FLOPs with topk=2)")
+parser.add_argument("--moe-capacity-factor", type=float, default=0.0, help="if >0, use fixed-capacity expert dispatch with per-expert capacity = ceil(tokens*topk/n_experts*factor)")
 parser.add_argument("--balance-loss-coeff", type=float, default=0.01, help="coefficient for MoE load balancing loss")
 # Training horizon (only one used, in order of precedence)
 parser.add_argument("--num-iterations", type=int, default=-1, help="explicit number of optimization steps (-1 = disable)")
@@ -146,6 +147,7 @@ def build_model_meta(depth):
         use_moe=args.use_moe, n_experts=args.n_experts,
         expert_topk=args.expert_topk, moe_freq=args.moe_freq,
         expert_hidden_mult=args.expert_hidden_mult,
+        moe_capacity_factor=args.moe_capacity_factor,
     )
     with torch.device("meta"):
         model_meta = GPT(config)

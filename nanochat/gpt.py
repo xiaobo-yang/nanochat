@@ -44,6 +44,7 @@ class GPTConfig:
     expert_topk: int = 2
     moe_freq: int = 1  # every N-th layer uses MoE (1=all layers)
     expert_hidden_mult: int = 4  # expert hidden dim = expert_hidden_mult * n_embd
+    moe_capacity_factor: float = 0.0  # <=0 disables fixed-capacity dispatch
 
 
 def norm(x):

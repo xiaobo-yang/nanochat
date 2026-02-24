@@ -1,3 +1,5 @@
+import math
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -22,11 +24,84 @@ class MoE(nn.Module):
         self.experts = nn.ModuleList([MLP(config) for _ in range(config.n_experts)])
         self.topk = config.expert_topk
         self.n_experts = config.n_experts
+        self.capacity_factor = float(getattr(config, "moe_capacity_factor", 0.0))
         if not (1 <= self.topk <= self.n_experts):
             raise ValueError(
                 f"expert_topk must satisfy 1 <= expert_topk <= n_experts, "
                 f"got expert_topk={self.topk}, n_experts={self.n_experts}"
             )
+        if self.capacity_factor < 0:
+            raise ValueError(
+                f"moe_capacity_factor must be >= 0, got {self.capacity_factor}"
+            )
+
+    def _dispatch_exact(
+        self,
+        x_flat: torch.Tensor,
+        token_indices: torch.Tensor,
+        expert_indices_flat: torch.Tensor,
+        routing_weights_flat: torch.Tensor,
+    ):
+        sort_perm = torch.argsort(expert_indices_flat)
+        token_indices_sorted = token_indices[sort_perm]
+        routing_weights_sorted = routing_weights_flat[sort_perm]
+        expert_counts = torch.bincount(expert_indices_flat, minlength=self.n_experts)
+
+        out = torch.zeros_like(x_flat)
+        start = 0
+        for idx, count in enumerate(expert_counts.tolist()):
+            if count == 0:
+                continue
+            end = start + count
+            idx_tokens = token_indices_sorted[start:end]
+            idx_weights = routing_weights_sorted[start:end]
+            expert_out = self.experts[idx](x_flat.index_select(0, idx_tokens))
+            out.index_add_(0, idx_tokens, expert_out * idx_weights.unsqueeze(-1).to(expert_out.dtype))
+            start = end
+        return out, expert_counts
+
+    def _dispatch_fixed_capacity(
+        self,
+        x_flat: torch.Tensor,
+        token_indices: torch.Tensor,
+        expert_indices_flat: torch.Tensor,
+        routing_weights_flat: torch.Tensor,
+    ):
+        num_assignments = token_indices.numel()
+        capacity = max(
+            1,
+            math.ceil((num_assignments / self.n_experts) * self.capacity_factor),
+        )
+
+        sort_perm = torch.argsort(expert_indices_flat)
+        token_indices_sorted = token_indices[sort_perm]
+        routing_weights_sorted = routing_weights_flat[sort_perm]
+        expert_counts = torch.bincount(expert_indices_flat, minlength=self.n_experts)
+
+        out = torch.zeros_like(x_flat)
+        start = 0
+        zero_token = torch.tensor([0], dtype=token_indices.dtype, device=token_indices.device)
+        dropped = 0
+        for idx, count in enumerate(expert_counts.tolist()):
+            end = start + count
+            take = min(count, capacity)
+
+            idx_tokens = zero_token.repeat(capacity)
+            idx_weights = torch.zeros(capacity, dtype=routing_weights_sorted.dtype, device=routing_weights_sorted.device)
+            if take > 0:
+                idx_tokens[:take] = token_indices_sorted[start:start + take]
+                idx_weights[:take] = routing_weights_sorted[start:start + take]
+
+            expert_out = self.experts[idx](x_flat.index_select(0, idx_tokens))
+            out.index_add_(0, idx_tokens, expert_out * idx_weights.unsqueeze(-1).to(expert_out.dtype))
+
+            dropped += count - take
+            start = end
+
+        self.last_dropped_assignments = dropped
+        self.last_drop_fraction = dropped / max(1, num_assignments)
+        self.last_capacity = capacity
+        return out, expert_counts
 
     def forward(self, x):  # x is (B, T, D)
         B, T, D = x.shape
@@ -42,26 +117,16 @@ class MoE(nn.Module):
         expert_indices_flat = expert_indices.reshape(-1)
         routing_weights_flat = routing_weights.reshape(-1)
 
-        # Group dispatches by expert to avoid repeated dense boolean masking.
-        sort_perm = torch.argsort(expert_indices_flat)
-        token_indices_sorted = token_indices[sort_perm]
-        routing_weights_sorted = routing_weights_flat[sort_perm]
+        if self.capacity_factor > 0:
+            out, expert_counts = self._dispatch_fixed_capacity(
+                x_flat, token_indices, expert_indices_flat, routing_weights_flat
+            )
+        else:
+            out, expert_counts = self._dispatch_exact(
+                x_flat, token_indices, expert_indices_flat, routing_weights_flat
+            )
 
-        expert_counts = torch.bincount(expert_indices_flat, minlength=self.n_experts)
         expert_freq = expert_counts.to(dtype=gate_probs.dtype) / num_tokens
-
-        out = torch.zeros_like(x_flat)
-        start = 0
-        for idx, count in enumerate(expert_counts.tolist()):
-            if count == 0:
-                continue
-            end = start + count
-            idx_tokens = token_indices_sorted[start:end]
-            idx_weights = routing_weights_sorted[start:end]
-            expert_out = self.experts[idx](x_flat.index_select(0, idx_tokens))
-            out.index_add_(0, idx_tokens, expert_out * idx_weights.unsqueeze(-1).to(expert_out.dtype))
-            start = end
-
         out = out.view(B, T, D)
         # loss = E * sum_i f_i * P_i, where P_i is mean routing probability of expert i
         balance_loss = (gate_probs.mean(dim=0) * expert_freq.detach()).sum() * self.n_experts
