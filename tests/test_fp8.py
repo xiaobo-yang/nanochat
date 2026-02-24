@@ -25,3 +25,16 @@ def test_float8_linear_forward_allows_empty_batch():
     x = torch.empty(0, 64, device="cuda", dtype=torch.bfloat16)
     y = fp8_linear(x)
     assert y.shape == (0, 32)
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="requires CUDA for FP8 matmul")
+def test_float8_linear_backward_allows_non_aligned_batch():
+    linear = torch.nn.Linear(64, 32, bias=False, device="cuda", dtype=torch.bfloat16)
+    fp8_linear = Float8Linear.from_float(linear).to(device="cuda")
+    x = torch.randn(23, 64, device="cuda", dtype=torch.bfloat16, requires_grad=True)
+    y = fp8_linear(x)
+    loss = y.square().mean()
+    loss.backward()
+
+    assert x.grad is not None
+    assert fp8_linear.weight.grad is not None

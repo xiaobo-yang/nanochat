@@ -188,7 +188,18 @@ class _Float8Matmul(torch.autograd.Function):
         # Transposing gives column-major, but first arg needs row-major,
         # so we must call .contiguous() to physically rearrange the memory.
         go_T = go_fp8_2.t().contiguous()  # [N, B] row-major
-        in_col = _to_col_major(in_fp8)    # [B, K] column-major
+
+        # _scaled_mm requires the shared K dimension to be divisible by 16.
+        # For MoE experts, B is per-expert token count and often not aligned.
+        # Zero-pad B on both operands (math-equivalent for matmul) to satisfy
+        # kernel constraints while preserving output shape [N, K].
+        shared_dim = go_T.size(1)
+        if shared_dim % 16 != 0:
+            pad = 16 - (shared_dim % 16)
+            go_T = torch.nn.functional.pad(go_T, (0, pad))
+            in_fp8 = torch.nn.functional.pad(in_fp8, (0, 0, 0, pad))
+
+        in_col = _to_col_major(in_fp8)    # [B, K] (possibly padded) column-major
         grad_weight = torch._scaled_mm(
             go_T,
             in_col,
