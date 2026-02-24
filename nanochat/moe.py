@@ -80,23 +80,29 @@ class MoE(nn.Module):
 
         out = torch.zeros_like(x_flat)
         start = 0
-        zero_token = torch.tensor([0], dtype=token_indices.dtype, device=token_indices.device)
+        # Allocate per-forward padded routing buffers once, then reuse per expert.
+        all_tokens = torch.zeros(
+            self.n_experts, capacity, dtype=token_indices.dtype, device=token_indices.device
+        )
+        all_weights = torch.zeros(
+            self.n_experts, capacity, dtype=routing_weights_sorted.dtype, device=routing_weights_sorted.device
+        )
         dropped = 0
         for idx, count in enumerate(expert_counts.tolist()):
             end = start + count
             take = min(count, capacity)
-
-            idx_tokens = zero_token.repeat(capacity)
-            idx_weights = torch.zeros(capacity, dtype=routing_weights_sorted.dtype, device=routing_weights_sorted.device)
             if take > 0:
-                idx_tokens[:take] = token_indices_sorted[start:start + take]
-                idx_weights[:take] = routing_weights_sorted[start:start + take]
-
-            expert_out = self.experts[idx](x_flat.index_select(0, idx_tokens))
-            out.index_add_(0, idx_tokens, expert_out * idx_weights.unsqueeze(-1).to(expert_out.dtype))
+                all_tokens[idx, :take] = token_indices_sorted[start:start + take]
+                all_weights[idx, :take] = routing_weights_sorted[start:start + take]
 
             dropped += count - take
             start = end
+
+        for idx in range(self.n_experts):
+            idx_tokens = all_tokens[idx]
+            idx_weights = all_weights[idx]
+            expert_out = self.experts[idx](x_flat.index_select(0, idx_tokens))
+            out.index_add_(0, idx_tokens, expert_out * idx_weights.unsqueeze(-1).to(expert_out.dtype))
 
         self.last_dropped_assignments = dropped
         self.last_drop_fraction = dropped / max(1, num_assignments)
