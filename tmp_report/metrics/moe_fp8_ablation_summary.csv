@@ -7,6 +7,7 @@ moe_fp8_experts_nocompile,completed,140,139,4.673790,367435.48,4.4458,1427.60,22
 moe_fp8_experts_static_repeat,completed,140,139,4.674189,478362.16,5.7888,1097.02,22787.25,2.54,
 moe_fp8_experts_nocompile_repeat2,completed,140,139,4.672930,364788.90,4.4134,1440.62,22864.65,3.23,
 moe_bf16_experts_dynamic,completed,140,139,4.660481,947987.46,11.4710,556.61,21107.20,1.71,
+moe_bf16_experts_dynamic_long,completed,360,359,3.522239,1038953.14,12.5716,508.81,21101.70,3.65,
 moe_fp8_dynamic_noexpertfp8,completed,140,139,4.673888,913355.96,11.0518,579.55,20979.88,1.73,
 moe_fp8_dynamic_noexpertfp8_long,completed,360,359,3.528897,963503.82,11.6596,545.02,20983.23,3.89,
 moe_fp8_experts_dynamic_coalesce0_retry2,completed,140,139,4.672379,781337.72,9.4542,673.00,19669.95,1.64,
