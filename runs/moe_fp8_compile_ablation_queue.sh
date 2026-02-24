@@ -11,6 +11,7 @@ fi
 
 export OMP_NUM_THREADS="${OMP_NUM_THREADS:-1}"
 export NPROC_PER_NODE="${NPROC_PER_NODE:-8}"
+export AUTO_FALLBACK_ON_COMPILE_FAILURE="${AUTO_FALLBACK_ON_COMPILE_FAILURE:-1}"
 
 DEFAULT_ROOT="/mnt/stepeval/yangxiaobo/cache/nanochat/tmp_exp"
 if [[ -n "${1:-}" ]]; then
@@ -53,8 +54,15 @@ run_one() {
   local run_name="$1"
   shift
   local extra_args=("$@")
+  local compile_mode="auto"
   local log_path="${EXP_DIR}/${run_name}.log"
   local cmd_path="${EXP_DIR}/${run_name}.cmd.txt"
+
+  for ((i=0; i<${#extra_args[@]}; i++)); do
+    if [[ "${extra_args[i]}" == "--compile-mode" ]] && (( i + 1 < ${#extra_args[@]} )); then
+      compile_mode="${extra_args[i+1]}"
+    fi
+  done
 
   {
     echo "[queue ${QUEUE_TAG} $(date -Iseconds)] start ${run_name}"
@@ -83,6 +91,43 @@ run_one() {
     --exp-dir "${EXP_DIR}" \
     --out-md "${REPORT_PREFIX}.md"
   cp "${REPORT_PREFIX}.md" "tmp_report/$(date +%Y%m%d_%H%M%S)_moe_fp8_compile_ablation_progress.md"
+
+  if [[ "${AUTO_FALLBACK_ON_COMPILE_FAILURE}" == "1" ]] && [[ "${status}" -ne 0 ]] && [[ "${compile_mode}" != "none" ]] && \
+    grep -Eq "InductorError|Expected self.size\\(1\\) to be divisible by 16" "${log_path}"; then
+    local fallback_run_name="${run_name}_fallback_none"
+    local fallback_log_path="${EXP_DIR}/${fallback_run_name}.log"
+    local fallback_cmd_path="${EXP_DIR}/${fallback_run_name}.cmd.txt"
+    local fallback_args=("${extra_args[@]}" --compile-mode none)
+
+    {
+      echo "[queue ${QUEUE_TAG} $(date -Iseconds)] fallback ${fallback_run_name} trigger=compile_failure primary_status=${status}"
+      echo "[queue ${QUEUE_TAG} $(date -Iseconds)] start ${fallback_run_name}"
+    } | tee -a "${LAUNCH_LOG}"
+
+    {
+      echo "torchrun --standalone --nproc_per_node=${NPROC_PER_NODE} -m scripts.base_train -- \\"
+      printf "  %q \\\n" "${common_args[@]}"
+      printf "  %q \\\n" --model-tag "${fallback_run_name}"
+      printf "  %q \\\n" "${fallback_args[@]}"
+    } > "${fallback_cmd_path}"
+
+    set +e
+    torchrun --standalone --nproc_per_node="${NPROC_PER_NODE}" -m scripts.base_train -- \
+      "${common_args[@]}" \
+      --model-tag "${fallback_run_name}" \
+      "${fallback_args[@]}" 2>&1 | tee "${fallback_log_path}"
+    local fallback_status=${PIPESTATUS[0]}
+    set -e
+
+    {
+      echo "[queue ${QUEUE_TAG} $(date -Iseconds)] finish ${fallback_run_name} status=${fallback_status}"
+    } | tee -a "${LAUNCH_LOG}"
+
+    python tmp_report/generate_moe_fp8_ablation_report.py \
+      --exp-dir "${EXP_DIR}" \
+      --out-md "${REPORT_PREFIX}.md"
+    cp "${REPORT_PREFIX}.md" "tmp_report/$(date +%Y%m%d_%H%M%S)_moe_fp8_compile_ablation_progress.md"
+  fi
 
   return "${status}"
 }
