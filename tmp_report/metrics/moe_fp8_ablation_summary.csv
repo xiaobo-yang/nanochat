@@ -8,8 +8,10 @@ moe_fp8_experts_static_repeat,completed,140,139,4.674189,478362.16,5.7888,1097.0
 moe_fp8_experts_nocompile_repeat2,completed,140,139,4.672930,364788.90,4.4134,1440.62,22864.65,3.23,
 moe_bf16_experts_dynamic,completed,140,139,4.660481,947987.46,11.4710,556.61,21107.20,1.71,
 moe_bf16_experts_dynamic_long,completed,360,359,3.522239,1038953.14,12.5716,508.81,21101.70,3.65,
+moe_bf16_experts_nocompile_long,completed,360,359,3.522287,1029301.24,12.4546,512.33,23427.59,3.42,
 moe_fp8_dynamic_noexpertfp8,completed,140,139,4.673888,913355.96,11.0518,579.55,20979.88,1.73,
 moe_fp8_dynamic_noexpertfp8_long,completed,360,359,3.528897,963503.82,11.6596,545.02,20983.23,3.89,
 moe_fp8_experts_dynamic_coalesce0_retry2,completed,140,139,4.672379,781337.72,9.4542,673.00,19669.95,1.64,
 moe_fp8_experts_dynamic_long,completed,360,359,3.531004,799037.72,9.6684,657.40,19665.65,4.08,
+moe_fp8_experts_nocompile_long,completed,360,359,3.531636,366418.66,4.4342,1434.67,22867.05,8.46,
 moe_fp8_experts_static.fail1,failed,1,0,10.397762,40703.00,0.4900,12880.75,,,"RuntimeError: Expected self.size(1) to be divisible by 16, but got self.size(1)=5420"
