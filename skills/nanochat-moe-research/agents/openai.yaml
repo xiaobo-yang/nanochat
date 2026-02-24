@@ -1,0 +1,4 @@
+interface:
+  display_name: "Nanochat MoE Research"
+  short_description: "Structured MoE/SFT experiments for nanochat"
+  default_prompt: "Use $nanochat-moe-research to run a reproducible MoE/SFT experiment with branch and checkpoint constraints."
