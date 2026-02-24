@@ -106,10 +106,12 @@ def place_eval_bundle(file_path):
     print0(f"Placed eval_bundle directory at {eval_bundle_dir}")
 
 
-def evaluate_core(model, tokenizer, device, max_per_task=-1):
+def evaluate_core(model, tokenizer, device, max_per_task=-1, shuffle_seed=1337):
     """
     Evaluate a base model on the CORE benchmark.
     Returns dict with results, centered_results, and core_metric.
+    shuffle_seed: RNG seed for shuffling examples per task (default 1337). Use different seeds
+        across runs to get diversity in few-shot order / subsample and meaningful error bars.
     """
     base_dir = get_base_dir()
     eval_bundle_dir = os.path.join(base_dir, "eval_bundle")
@@ -152,13 +154,13 @@ def evaluate_core(model, tokenizer, device, max_per_task=-1):
         with open(data_path, 'r', encoding='utf-8') as f:
             data = [json.loads(line.strip()) for line in f]
 
-        # Shuffle for consistent subsampling when using max_per_task
-        shuffle_rng = random.Random(1337)
+        # Shuffle for subsampling (max_per_task); seed controls order for reproducibility or diversity
+        shuffle_rng = random.Random(shuffle_seed)
         shuffle_rng.shuffle(data)
         if max_per_task > 0:
             data = data[:max_per_task]
 
-        accuracy = evaluate_task(model, tokenizer, data, device, task_meta)
+        accuracy = evaluate_task(model, tokenizer, data, device, task_meta, fewshot_seed=shuffle_seed)
         results[label] = accuracy
         random_baseline = random_baselines[label]
         centered_result = (accuracy - 0.01 * random_baseline) / (1.0 - 0.01 * random_baseline)
@@ -184,6 +186,7 @@ def main():
     parser.add_argument('--model-tag', type=str, default=None, help='nanochat model tag to identify the checkpoint directory')
     parser.add_argument('--step', type=int, default=None, help='Model step to load (default = last)')
     parser.add_argument('--max-per-task', type=int, default=-1, help='Max examples per CORE task (-1 = all)')
+    parser.add_argument('--shuffle-seed', type=int, default=1337, help='RNG seed for CORE task example order (use different seeds per run for diversity/error bars)')
     parser.add_argument('--device-batch-size', type=int, default=32, help='Per-device batch size for BPB evaluation')
     parser.add_argument('--split-tokens', type=int, default=40*524288, help='Number of tokens to evaluate per split for BPB')
     parser.add_argument('--device-type', type=str, default='', help='cuda|cpu|mps (empty = autodetect)')
@@ -241,11 +244,13 @@ def main():
                 "If 5*x + 3 = 13, then x is",
             ]
             engine = Engine(model, tokenizer)
+            # seed: same shuffle_seed as CORE so each run can differ (conditioned is temp=0 so still deterministic)
+            sample_seed = args.shuffle_seed
             print0("\nConditioned samples:")
             for prompt in prompts:
                 tokens = tokenizer(prompt, prepend="<|bos|>")
                 with autocast_ctx:
-                    sample, _ = engine.generate_batch(tokens, num_samples=1, max_tokens=16, temperature=0)
+                    sample, _ = engine.generate_batch(tokens, num_samples=1, max_tokens=16, temperature=0, seed=sample_seed)
                 sample_str = tokenizer.decode(sample[0])
                 print0("-" * 80)
                 print0(sample_str)
@@ -254,7 +259,7 @@ def main():
             print0("\nUnconditioned samples:")
             tokens = tokenizer("", prepend="<|bos|>")
             with autocast_ctx:
-                uncond, _ = engine.generate_batch(tokens, num_samples=8, max_tokens=128, temperature=1.0)
+                uncond, _ = engine.generate_batch(tokens, num_samples=8, max_tokens=128, temperature=1.0, seed=sample_seed)
             for sample in uncond:
                 sample_str = tokenizer.decode(sample)
                 print0("-" * 80)
@@ -288,7 +293,7 @@ def main():
         print0("CORE Evaluation")
         print0("="*80)
         with autocast_ctx:
-            core_results = evaluate_core(model, tokenizer, device, max_per_task=args.max_per_task)
+            core_results = evaluate_core(model, tokenizer, device, max_per_task=args.max_per_task, shuffle_seed=args.shuffle_seed)
 
         # Write CSV output
         if ddp_rank == 0:
